@@ -1,28 +1,32 @@
-name: Build Phaser APK
+name: Build APK from ZIP
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
 
     steps:
+      # 1) تحميل الـ repository
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Node.js 20
+      # 2) Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Java 21
+      # 3) Java المطلوب لـ Android
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
-      - name: Android SDK
+      # 4) Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK
@@ -31,11 +35,133 @@ jobs:
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
-      - name: Run Auto Builder
-        run: node auto-builder.mjs
+      # 5) استخراج ZIP
+      - name: Extract Game ZIP
+        run: |
+          rm -rf game
+          mkdir game
+          unzip -q "almanzil-almansi-v6-complete.zip" -d game
 
+          echo "=== ZIP CONTENT ==="
+          find game -maxdepth 2 -type f | sort
+
+      # 6) العثور على مجلد المشروع الحقيقي
+      - name: Locate Project
+        run: |
+          PROJECT=$(find "$GITHUB_WORKSPACE/game" \
+            -name package.json \
+            -not -path "*/node_modules/*" \
+            -print -quit \
+            | xargs dirname)
+
+          if [ -z "$PROJECT" ] || [ "$PROJECT" = "." ]; then
+            echo "❌ package.json not found"
+            exit 1
+          fi
+
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+          echo "=== PROJECT ==="
+          echo "$PROJECT"
+
+      # 7) تثبيت dependencies
+      - name: Install Dependencies
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          npm ci || npm install --legacy-peer-deps
+
+      # 8) فحص TypeScript
+      - name: TypeScript Check
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          npx tsc --noEmit
+
+      # 9) Build Vite
+      - name: Build Web Game
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          npm run build-nolog
+
+      # 10) تثبيت Capacitor
+      - name: Install Capacitor
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          npm install \
+            @capacitor/core@7 \
+            @capacitor/cli@7 \
+            @capacitor/android@7
+
+      # 11) إنشاء إعداد Capacitor
+      - name: Configure Capacitor
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'com.almanzilalmansi.game',
+            appName: 'Almanzil AlMansi',
+            webDir: 'dist',
+            server: {
+              androidScheme: 'https'
+            }
+          };
+
+          export default config;
+          EOF
+
+      # 12) إنشاء Android project
+      - name: Add Android
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          npx cap add android
+
+      # 13) نقل ملفات اللعبة إلى Android
+      - name: Capacitor Sync
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          npx cap sync android
+
+      # 14) محاولة إصلاح Android dependencies
+      - name: Prepare Android
+        working-directory: ${{ env.PROJECT }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --version
+
+      # 15) بناء APK
+      - name: Build APK
+        working-directory: ${{ env.PROJECT }}/android
+        run: |
+          ./gradlew assembleDebug --stacktrace
+
+      # 16) إعادة تسمية APK
+      - name: Prepare APK
+        run: |
+          mkdir -p output
+
+          APK=$(find "${PROJECT}/android/app/build/outputs/apk/debug" \
+            -name "*.apk" \
+            -type f \
+            | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "❌ APK was not generated"
+            exit 1
+          fi
+
+          cp "$APK" output/almanzil-almansi.apk
+
+          echo "================================"
+          echo "✅ APK CREATED SUCCESSFULLY"
+          echo "================================"
+
+          ls -lh output/almanzil-almansi.apk
+
+      # 17) إعطاء APK كملف قابل للتحميل من Actions
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Phaser-Game-APK
-          path: output/game.apk
+          name: almanzil-almansi-apk
+          path: output/almanzil-almansi.apk
+          if-no-files-found: error
