@@ -1,81 +1,127 @@
-name: Build React + Phaser
+name: React + Phaser to APK
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. تحميل ملفات المستودع
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find and extract ZIP
+      # 2. البحث عن ZIP وفك الضغط
+      - name: Extract ZIP
+        shell: bash
         run: |
           set -e
 
-          ZIP_FILE=$(find . -maxdepth 2 -type f -name "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "❌ ZIP file not found"
+            echo "❌ لم يتم العثور على ملف ZIP"
             exit 1
           fi
 
-          echo "📦 ZIP found: $ZIP_FILE"
+          echo "📦 ZIP: $ZIP_FILE"
 
           mkdir -p project
           unzip -q "$ZIP_FILE" -d project
 
-      - name: Find package.json
+      # 3. العثور على package.json تلقائياً
+      - name: Find React project
+        shell: bash
         run: |
           set -e
 
           PACKAGE=$(find project -type f -name "package.json" | head -n 1)
 
           if [ -z "$PACKAGE" ]; then
-            echo "❌ package.json not found"
+            echo "❌ لم يتم العثور على package.json"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PACKAGE")
 
-          echo "📁 Project directory: $PROJECT_DIR"
+          echo "📁 React project: $PROJECT_DIR"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+      # 4. إعداد Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
+      # 5. تثبيت مكتبات React + Phaser
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
-        run: npm install
-
-      - name: Build React + Phaser
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: npm run build
-
-      - name: Find build folder
         run: |
-          echo "🔎 Searching for build output..."
+          npm install
 
-          if [ -d "${PROJECT_DIR}/dist" ]; then
-            echo "✅ dist folder found"
-            echo "BUILD_DIR=${PROJECT_DIR}/dist" >> "$GITHUB_ENV"
+      # 6. بناء React
+      - name: Build React
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          npm run build
 
-          elif [ -d "${PROJECT_DIR}/build" ]; then
-            echo "✅ build folder found"
-            echo "BUILD_DIR=${PROJECT_DIR}/build" >> "$GITHUB_ENV"
+      # 7. تثبيت Capacitor
+      - name: Install Capacitor
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          npm install @capacitor/core @capacitor/cli @capacitor/android
 
-          else
-            echo "❌ Build folder not found"
-            exit 1
+      # 8. إنشاء Capacitor
+      - name: Initialize Capacitor
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
+            npx cap init "React Phaser App" "com.example.reactphaser" --web-dir dist
           fi
 
-      - name: Upload final build
+      # 9. إضافة Android
+      - name: Add Android platform
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
+      # 10. نسخ React إلى Android
+      - name: Sync Capacitor
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          npx cap sync android
+
+      # 11. إعداد Java
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # 12. إعداد Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 13. إعطاء صلاحية لـ Gradle
+      - name: Make Gradle executable
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        run: |
+          chmod +x gradlew
+
+      # 14. بناء APK
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        run: |
+          ./gradlew assembleDebug
+
+      # 15. رفع APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: react-phaser-build
-          path: ${{ env.BUILD_DIR }}
+          name: React-Phaser-APK
+          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
