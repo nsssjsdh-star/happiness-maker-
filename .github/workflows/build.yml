@@ -1,4 +1,4 @@
-name: Build APK
+name: Build React + Phaser
 
 on:
   workflow_dispatch:
@@ -8,32 +8,74 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract project
+      - name: Find and extract ZIP
         run: |
-          unzip -q *.zip -d extracted
-          PROJECT_DIR=$(find extracted -name pubspec.yaml -printf '%h\n' | head -1)
-          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
-          echo "Project found at: $PROJECT_DIR"
+          set -e
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+          ZIP_FILE=$(find . -maxdepth 2 -type f -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "❌ ZIP file not found"
+            exit 1
+          fi
+
+          echo "📦 ZIP found: $ZIP_FILE"
+
+          mkdir -p project
+          unzip -q "$ZIP_FILE" -d project
+
+      - name: Find package.json
+        run: |
+          set -e
+
+          PACKAGE=$(find project -type f -name "package.json" | head -n 1)
+
+          if [ -z "$PACKAGE" ]; then
+            echo "❌ package.json not found"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PACKAGE")
+
+          echo "📁 Project directory: $PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          channel: stable
-          cache: true
+          node-version: 22
 
-      - name: Get dependencies
-        run: flutter pub get
+      - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
+        run: npm install
 
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Build React + Phaser
         working-directory: ${{ env.PROJECT_DIR }}
+        run: npm run build
 
-      - name: Upload APK
+      - name: Find build folder
+        run: |
+          echo "🔎 Searching for build output..."
+
+          if [ -d "${PROJECT_DIR}/dist" ]; then
+            echo "✅ dist folder found"
+            echo "BUILD_DIR=${PROJECT_DIR}/dist" >> "$GITHUB_ENV"
+
+          elif [ -d "${PROJECT_DIR}/build" ]; then
+            echo "✅ build folder found"
+            echo "BUILD_DIR=${PROJECT_DIR}/build" >> "$GITHUB_ENV"
+
+          else
+            echo "❌ Build folder not found"
+            exit 1
+          fi
+
+      - name: Upload final build
         uses: actions/upload-artifact@v4
         with:
-          name: happiness-maker-apk
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          name: react-phaser-build
+          path: ${{ env.BUILD_DIR }}
