@@ -1,127 +1,41 @@
-name: React + Phaser to APK
+name: Build Phaser APK
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. تحميل ملفات المستودع
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. البحث عن ZIP وفك الضغط
-      - name: Extract ZIP
-        shell: bash
-        run: |
-          set -e
-
-          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "❌ لم يتم العثور على ملف ZIP"
-            exit 1
-          fi
-
-          echo "📦 ZIP: $ZIP_FILE"
-
-          mkdir -p project
-          unzip -q "$ZIP_FILE" -d project
-
-      # 3. العثور على package.json تلقائياً
-      - name: Find React project
-        shell: bash
-        run: |
-          set -e
-
-          PACKAGE=$(find project -type f -name "package.json" | head -n 1)
-
-          if [ -z "$PACKAGE" ]; then
-            echo "❌ لم يتم العثور على package.json"
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$PACKAGE")
-
-          echo "📁 React project: $PROJECT_DIR"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      # 4. إعداد Node.js
-      - name: Setup Node.js
+      - name: Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
 
-      # 5. تثبيت مكتبات React + Phaser
-      - name: Install dependencies
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          npm install
-
-      # 6. بناء React
-      - name: Build React
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          npm run build
-
-      # 7. تثبيت Capacitor
-      - name: Install Capacitor
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
-
-      # 8. إنشاء Capacitor
-      - name: Initialize Capacitor
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
-            npx cap init "React Phaser App" "com.example.reactphaser" --web-dir dist
-          fi
-
-      # 9. إضافة Android
-      - name: Add Android platform
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          if [ ! -d android ]; then
-            npx cap add android
-          fi
-
-      # 10. نسخ React إلى Android
-      - name: Sync Capacitor
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          npx cap sync android
-
-      # 11. إعداد Java
-      - name: Setup Java
+      - name: Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: "21"
 
-      # 12. إعداد Android SDK
-      - name: Setup Android SDK
+      - name: Android SDK
         uses: android-actions/setup-android@v3
 
-      # 13. إعطاء صلاحية لـ Gradle
-      - name: Make Gradle executable
-        working-directory: ${{ env.PROJECT_DIR }}/android
+      - name: Install Android SDK
         run: |
-          chmod +x gradlew
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
-      # 14. بناء APK
-      - name: Build APK
-        working-directory: ${{ env.PROJECT_DIR }}/android
-        run: |
-          ./gradlew assembleDebug
+      - name: Run Auto Builder
+        run: node auto-builder.mjs
 
-      # 15. رفع APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: React-Phaser-APK
-          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+          name: Phaser-Game-APK
+          path: output/game.apk
